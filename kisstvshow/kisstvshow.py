@@ -1,4 +1,5 @@
 from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 import requests
 
@@ -202,3 +203,113 @@ class KissTVShow:
             "episodes": all_episodes,
             "casts": casts,
         }
+
+    def get_show_episode(self, show_ep: str | None = None, url: str | None = None):
+        if show_ep is None and url is None:
+            raise Exception("Requires atleast one of `show_ep`  or `url` parameters.")
+
+        final_url = ""
+        if show_ep is not None:
+            if show_ep.startswith("/Show/") or show_ep.startswith("Show/"):
+                final_url = urljoin(self.url, show_ep)
+            else:
+                final_url = urljoin(self.url, f"Show/{show_ep.strip('/')}")
+
+        if url is not None:
+            if "/Show/" in url:
+                final_url = url
+
+        if final_url == "":
+            raise Exception("Final url is empty, is `show_ep` or `url` correct?")
+
+        r = self.session.get(final_url)
+        if r.status_code != 200:
+            raise Exception("There was a problem when trying to search shows. ", r)
+
+        soup = parse_to_bs4(r.text)
+
+        # title
+        show_title = (
+            soup.find("div", id="navsubbar")
+            .get_text()
+            .replace("Show", "", 1)
+            .replace(
+                " information", ""  # note: there might be future problems with this one
+            )
+            .strip()
+        )
+
+        # episode
+        show_episode = (
+            soup.find("select", id="selectEpisode")
+            .find("option", {"selected": True})
+            .get_text()
+            .strip()
+        )
+
+        # parse servers
+        ep_sel_servers = soup.find("select", id="selectServer").find_all("option")
+        all_servers = {}
+        for index, i in enumerate(ep_sel_servers):
+            all_servers[i.get_text().strip()] = {"url": i.get("value"), "index": index}
+
+        show_servers = []
+        for s, v in all_servers.items():
+            # beta is not supported as of now
+            if s.lower() == "beta":
+                continue
+
+            if v["index"] == 0:
+                video = self._get_ep_show_video(soup)
+
+                show_servers.append(
+                    {
+                        "server": s,
+                        "link": {
+                            "short": v["url"],
+                            "complete": urljoin(self.url, v["url"]),
+                        },
+                        "video": video,
+                    }
+                )
+                continue
+
+            # need to loop and get soup
+            ep_server_r = self.session.get(urljoin(self.url, v["url"]))
+            if ep_server_r.status_code != 200:
+                show_servers.append(
+                    {
+                        "server": s,
+                        "link": {
+                            "short": v["url"],
+                            "complete": urljoin(self.url, v["url"]),
+                        },
+                        "video": None,
+                    }
+                )
+                continue
+
+            ep_server_soup = parse_to_bs4(ep_server_r.text)
+            video = self._get_ep_show_video(ep_server_soup)
+            if s == "HX":
+                video = f"https:{video}"
+            show_servers.append(
+                {
+                    "server": s,
+                    "link": {
+                        "short": v["url"],
+                        "complete": urljoin(self.url, v["url"]),
+                    },
+                    "video": video,
+                }
+            )
+
+        return {
+            "title": show_title,
+            "episode": show_episode,
+            "servers": show_servers,
+        }
+
+    def _get_ep_show_video(self, soup: BeautifulSoup):
+        video = soup.find("div", id="centerDivVideo").find("iframe").get("src")
+        return video

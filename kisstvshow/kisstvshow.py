@@ -57,7 +57,14 @@ class KissTVShow:
             # get only relevant details
             show_title = tds[0].find("a").get_text().strip()
             show_link = urljoin(self.url, tds[0].find("a")["href"])
-            show_latest = tds[1].get_text().strip()
+            
+            latest_item = tds[1]
+            show_latest = latest_item.get_text().strip()
+            show_latest_url = ""
+            if latest_item.find("a"):
+                show_latest_url = urljoin(self.url, latest_item.find("a").get("href"))
+        
+
             show_just_updated = (
                 True if i.find("img", attrs={"title": "Just updated"}) else False
             )
@@ -68,7 +75,10 @@ class KissTVShow:
                 {
                     "title": show_title,
                     "link": show_link,
-                    "latest": show_latest,
+                    "latest": {
+                        "title": show_latest,
+                        "url": show_latest_url,
+                    },
                     "just_updated": show_just_updated,
                     "hot": show_hot,
                 }
